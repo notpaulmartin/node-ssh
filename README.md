@@ -1,5 +1,4 @@
-Node-SSH - SSH2 with Promises
-=========
+# Node-SSH - SSH2 with Promises
 
 [![Greenkeeper badge](https://badges.greenkeeper.io/steelbrain/node-ssh.svg)](https://greenkeeper.io/)
 
@@ -15,85 +14,98 @@ path = require('path')
 node_ssh = require('node-ssh')
 ssh = new node_ssh()
 
-ssh.connect({
-  host: 'localhost',
-  username: 'steel',
-  privateKey: '/home/steel/.ssh/id_rsa'
-})
-/*
+ssh
+  .connect({
+    host: 'localhost',
+    username: 'steel',
+    privateKey: '/home/steel/.ssh/id_rsa',
+  })
+  /*
  Or
  ssh.connect({
    host: 'localhost',
    username: 'steel',
-   privateKey: fs.readFileSync('/home/steel/.ssh/id_rsa', 'utf8')
+   privateKey: fs.readFileSync('/home/steel/.ssh/id_rsa')
  })
  if you want to use the raw string as private key
  */
-.then(function() {
-  // Local, Remote
-  ssh.putFile('/home/steel/Lab/localPath', '/home/steel/Lab/remotePath').then(function() {
-    console.log("The File thing is done")
-  }, function(error) {
-    console.log("Something's wrong")
-    console.log(error)
+  .then(function() {
+    // Local, Remote
+    ssh.putFile('/home/steel/Lab/localPath', '/home/steel/Lab/remotePath').then(
+      function() {
+        console.log('The File thing is done')
+      },
+      function(error) {
+        console.log("Something's wrong")
+        console.log(error)
+      },
+    )
+    // Array<Shape('local' => string, 'remote' => string)>
+    ssh.putFiles([{ local: '/home/steel/Lab/localPath', remote: '/home/steel/Lab/remotePath' }]).then(
+      function() {
+        console.log('The File thing is done')
+      },
+      function(error) {
+        console.log("Something's wrong")
+        console.log(error)
+      },
+    )
+    // Local, Remote
+    ssh.getFile('/home/steel/Lab/localPath', '/home/steel/Lab/remotePath').then(
+      function(Contents) {
+        console.log("The File's contents were successfully downloaded")
+      },
+      function(error) {
+        console.log("Something's wrong")
+        console.log(error)
+      },
+    )
+    // Putting entire directories
+    const failed = []
+    const successful = []
+    ssh
+      .putDirectory('/home/steel/Lab', '/home/steel/Lab', {
+        recursive: true,
+        concurrency: 10,
+        validate: function(itemPath) {
+          const baseName = path.basename(itemPath)
+          return (
+            baseName.substr(0, 1) !== '.' && baseName !== 'node_modules' // do not allow dot files
+          ) // do not allow node_modules
+        },
+        tick: function(localPath, remotePath, error) {
+          if (error) {
+            failed.push(localPath)
+          } else {
+            successful.push(localPath)
+          }
+        },
+      })
+      .then(function(status) {
+        console.log('the directory transfer was', status ? 'successful' : 'unsuccessful')
+        console.log('failed transfers', failed.join(', '))
+        console.log('successful transfers', successful.join(', '))
+      })
+    // Command
+    ssh.execCommand('hh_client --json', { cwd: '/var/www' }).then(function(result) {
+      console.log('STDOUT: ' + result.stdout)
+      console.log('STDERR: ' + result.stderr)
+    })
+    // Command with escaped params
+    ssh.exec('hh_client', ['--json'], { cwd: '/var/www', stream: 'stdout', options: { pty: true } }).then(function(result) {
+      console.log('STDOUT: ' + result)
+    })
+    // With streaming stdout/stderr callbacks
+    ssh.exec('hh_client', ['--json'], {
+      cwd: '/var/www',
+      onStdout(chunk) {
+        console.log('stdoutChunk', chunk.toString('utf8'))
+      },
+      onStderr(chunk) {
+        console.log('stderrChunk', chunk.toString('utf8'))
+      },
+    })
   })
-  // Array<Shape('local' => string, 'remote' => string)>
-  ssh.putFiles([{ local: '/home/steel/Lab/localPath', remote: '/home/steel/Lab/remotePath' }]).then(function() {
-    console.log("The File thing is done")
-  }, function(error) {
-    console.log("Something's wrong")
-    console.log(error)
-  })
-  // Local, Remote
-  ssh.getFile('/home/steel/Lab/localPath', '/home/steel/Lab/remotePath').then(function(Contents) {
-    console.log("The File's contents were successfully downloaded")
-  }, function(error) {
-    console.log("Something's wrong")
-    console.log(error)
-  })
-  // Putting entire directories
-  const failed = []
-  const successful = []
-  ssh.putDirectory('/home/steel/Lab', '/home/steel/Lab', {
-    recursive: true,
-    concurrency: 10,
-    validate: function(itemPath) {
-      const baseName = path.basename(itemPath)
-      return baseName.substr(0, 1) !== '.' && // do not allow dot files
-             baseName !== 'node_modules' // do not allow node_modules
-    },
-    tick: function(localPath, remotePath, error) {
-      if (error) {
-        failed.push(localPath)
-      } else {
-        successful.push(localPath)
-      }
-    }
-  }).then(function(status) {
-    console.log('the directory transfer was', status ? 'successful' : 'unsuccessful')
-    console.log('failed transfers', failed.join(', '))
-    console.log('successful transfers', successful.join(', '))
-  })
-  // Command
-  ssh.execCommand('hh_client --json', { cwd:'/var/www' }).then(function(result) {
-    console.log('STDOUT: ' + result.stdout)
-    console.log('STDERR: ' + result.stderr)
-  })
-  // Command with escaped params
-  ssh.exec('hh_client', ['--json'], { cwd: '/var/www', stream: 'stdout', options: { pty: true } }).then(function(result) {
-    console.log('STDOUT: ' + result)
-  })
-  // With streaming stdout/stderr callbacks
-  ssh.exec('hh_client', ['--json'], {
-    cwd: '/var/www',
-    onStdout(chunk) {
-      console.log('stdoutChunk', chunk.toString('utf8'))
-    },
-    onStderr(chunk) {
-      console.log('stderrChunk', chunk.toString('utf8'))
-    },
-  })
-})
 ```
 
 #### API
@@ -115,7 +127,7 @@ type PutDirectoryOptions = {
 type ExecOptions = {
   cwd?: string,
   options?: Object // passed to ssh2.exec
-  stdin?: string,
+  stdin?: string | EventEmitter,
   stream?: 'stdout' | 'stderr' | 'both',
   onStdout?: ((chunk: Buffer) => void),
   onStderr?: ((chunk: Buffer) => void),
@@ -152,18 +164,17 @@ ssh.connect({
   password,
   tryKeyboard: true,
   onKeyboardInteractive: (name, instructions, instructionsLang, prompts, finish) => {
-      if (prompts.length > 0 && prompts[0].prompt.toLowerCase().includes('password')) {
-        finish([password])
-      }
+    if (prompts.length > 0 && prompts[0].prompt.toLowerCase().includes('password')) {
+      finish([password])
     }
+  },
 })
 ```
-
-
 
 For further information see: https://github.com/mscdex/ssh2/issues/604
 
 ### License
+
 This project is licensed under the terms of MIT license. See the LICENSE file for more info.
 
-[ssh2]:https://github.com/mscdex/ssh2
+[ssh2]: https://github.com/mscdex/ssh2

@@ -1,6 +1,7 @@
 /* @flow */
 
 import Path from 'path'
+import EventEmitter from 'events'
 import SSH2 from 'ssh2'
 import pMap from 'p-map'
 import invariant from 'assert'
@@ -49,14 +50,14 @@ class SSH {
     )
   }
   async requestShell(): Promise<Object> {
-    const { connection } = this
+    const connection = this.connection
     invariant(connection, 'Not connected to server')
     return new Promise(function(resolve, reject) {
       connection.shell(Helpers.generateCallback(resolve, reject))
     })
   }
   async requestSFTP(): Promise<Object> {
-    const { connection } = this
+    const connection = this.connection
     invariant(connection, 'Not connected to server')
     return new Promise(function(resolve, reject) {
       connection.sftp(Helpers.generateCallback(resolve, reject))
@@ -95,7 +96,7 @@ class SSH {
     parameters: Array<string> = [],
     options: {
       cwd?: string,
-      stdin?: string,
+      stdin?: string | EventEmitter,
       stream?: string,
       options?: Object,
       onStdout?: (chunk: Buffer) => void,
@@ -105,7 +106,10 @@ class SSH {
     invariant(this.connection, 'Not connected to server')
     invariant(typeof options === 'object' && options, 'options must be an Object')
     invariant(!options.cwd || typeof options.cwd === 'string', 'options.cwd must be a string')
-    invariant(!options.stdin || typeof options.stdin === 'string', 'options.stdin must be a string')
+    invariant(
+      !options.stdin || typeof options.stdin === 'string' || options.stdin instanceof EventEmitter,
+      'options.stdin must be a string or an EventEmitter',
+    )
     invariant(
       !options.stream || ['stdout', 'stderr', 'both'].indexOf(options.stream) !== -1,
       'options.stream must be among "stdout", "stderr" and "both"',
@@ -128,22 +132,26 @@ class SSH {
     givenCommand: string,
     options: {
       cwd?: string,
-      stdin?: string,
+      stdin?: string | EventEmitter,
       options?: Object,
       onStdout?: (chunk: Buffer) => void,
       onStderr?: (chunk: Buffer) => void,
     } = {},
   ): Promise<{ stdout: string, stderr: string, code: number, signal: ?string }> {
     let command = givenCommand
-    const { connection } = this
+    const connection = this.connection
     invariant(connection, 'Not connected to server')
     invariant(typeof options === 'object' && options, 'options must be an Object')
     invariant(!options.cwd || typeof options.cwd === 'string', 'options.cwd must be a string')
-    invariant(!options.stdin || typeof options.stdin === 'string', 'options.stdin must be a string')
+    invariant(
+      !options.stdin || typeof options.stdin === 'string' || options.stdin instanceof EventEmitter,
+      'options.stdin must be a string or an EventEmitter',
+    )
     invariant(!options.options || typeof options.options === 'object', 'options.options must be an object')
 
     if (options.cwd) {
-      command = `cd ${shellEscape([options.cwd])}; ${command}`
+      // NOTE: Output piping cd command to hide directory non-existent errors
+      command = `cd ${shellEscape([options.cwd])} 1> /dev/null 2> /dev/null; ${command}`
     }
     const output = { stdout: [], stderr: [] }
     return new Promise(function(resolve, reject) {
@@ -159,9 +167,31 @@ class SSH {
             if (options.onStderr) options.onStderr(chunk)
             output.stderr.push(chunk)
           })
-          if (options.stdin) {
+          if (typeof options.stdin === 'string' && options.stdin) {
             stream.write(options.stdin)
             stream.end()
+          } else if (options.stdin instanceof EventEmitter) {
+            const events = options.stdin
+            events.on('data', function(chunk) {
+              stream.write(chunk)
+            })
+            events.on('end', function() {
+              stream.end()
+            })
+            events.on('signal', function(signal, cb) {
+              const cont = stream.signal(signal)
+              if (cb) {
+                if (cont) cb()
+                else stream.once('continue', cb)
+              }
+            })
+            events.on('window', function({ rows, cols, height, width }, cb) {
+              const cont = stream.setWindow(rows, cols, height, width)
+              if (cb) {
+                if (cont) cb()
+                else stream.once('continue', cb)
+              }
+            })
           }
           stream.on('close', function(code, signal) {
             resolve({ code, signal, stdout: output.stdout.join('').trim(), stderr: output.stderr.join('').trim() })
@@ -231,7 +261,7 @@ class SSH {
     invariant(this.connection, 'Not connected to server')
     invariant(Array.isArray(files), 'files must be an array')
 
-    for (let i = 0, { length } = files; i < length; i += 1) {
+    for (let i = 0, length = files.length; i < length; ++i) {
       const file = files[i]
       invariant(file, 'files items must be valid objects')
       invariant(file.local && typeof file.local === 'string', `files[${i}].local must be a string`)
@@ -259,7 +289,7 @@ class SSH {
   async putDirectory(localDirectory: string, remoteDirectory: string, givenConfig: Object = {}): Promise<boolean> {
     invariant(this.connection, 'Not connected to server')
     invariant(typeof localDirectory === 'string' && localDirectory, 'localDirectory must be a string')
-    invariant(typeof remoteDirectory === 'string' && remoteDirectory, 'remoteDirectory must be a string')
+    invariant(typeof remoteDirectory === 'string' && remoteDirectory, 'localDirectory must be a string')
     invariant(await Helpers.exists(localDirectory), `localDirectory does not exist at ${localDirectory}`)
     invariant((await Helpers.stat(localDirectory)).isDirectory(), `localDirectory is not a directory at ${localDirectory}`)
     invariant(typeof givenConfig === 'object' && givenConfig, 'config must be an object')
